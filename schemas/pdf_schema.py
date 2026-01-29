@@ -28,16 +28,16 @@ class FoodPartDetail(PartDetail):
     food_category_reason: str = Field(..., description="Reason for the classification. Follow these steps strictly: 1. List all vegetables found in the part. 2. Explicitly state which are on the 'Target Vegetable' list and which are not. 3. Conclude 'TARGET_VEGATABLE' only if ALL vegetables are on the target list. 4. **FINAL CHECK: Before you conclude, you MUST double-check the 'Target Vegetable' list one last time. If you see 'төмс' (potato), 'лууван' (carrot), 'сонгино' (onion), or 'сармис' (garlic), the category MUST be 'OTHER'. No exceptions.** must be in english.")
     food_category: FoodCategory = Field(..., description="Category of food for this part.")
 
-class requirementsDetail(BaseModel):
+class RequirementsDetail(BaseModel):
     # III БҮЛЭГ. ТЕХНИКИЙН ТОДОРХОЙЛОЛТ, ТАВИГДАХ ШААРДЛАГА
-    main_requirements: str = Field(..., description="Main technical specifications and requirements. That is mentioned in section III titled 'ТЕХНИКИЙН ТОДОРХОЙЛОЛТ, ТАВИГДАХ ШААРДЛАГА', if applicable. Note: БҮЛЭГ means section, not a part/lot.")
-    business_requirements: Optional[str] = Field(None, description="Business requirements and conditions.")
-    technical_requirements: Optional[str] = Field(None, description="Technical requirements and conditions.")
+    main_requirements: str = Field(..., description="Extract ALL main technical specifications and requirements from section III titled 'ТЕХНИКИЙН ТОДОРХОЙЛОЛТ, ТАВИГДАХ ШААРДЛАГА'. Include quality standards, delivery requirements, packaging specifications, certification requirements, and any compliance standards mentioned. Note: БҮЛЭГ means section, not a part/lot. Be comprehensive and capture all details.")
+    business_requirements: Optional[str] = Field(None, description="Extract ALL business-related requirements including payment terms, contract conditions, supplier qualifications, registration requirements, legal compliance, insurance requirements, and any other commercial terms and conditions mentioned in the document.")
+    technical_requirements: Optional[str] = Field(None, description="Extract ALL technical requirements including product specifications, measurement standards, testing procedures, inspection criteria, storage conditions, transportation requirements, and any technical compliance or certification standards mentioned in the document.")
     
 class PDFOverview(BaseModel):
     have_parts: bool = Field(..., description="Indicates if the PDF has multiple parts/lots (Багц).")
     parts: Optional[List[PartDetail]] = Field(None, description="List of parts/lots (Багц) in the PDF, if applicable. Do not include БҮЛЭГ (sections) as parts.")
-    requirements: requirementsDetail = Field(..., description="Technical and business requirements details, if applicable.")
+    requirements: RequirementsDetail = Field(..., description="Technical and business requirements details, if applicable.")
 
 class PDFFoodOverview(PDFOverview):
     parts: Optional[List[FoodPartDetail]] = Field(None, description="List of food-related parts/lots (Багц) in the PDF, if applicable.")
