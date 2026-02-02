@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from typing import List
 import re
+from collections import Counter
 
 from src.logger import logger
 
@@ -17,32 +18,81 @@ def clean_text(text):
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
+
+def safe_text(el) -> str:
+    """Safely extract text from a BeautifulSoup element."""
+    if el is None:
+        return ""
+    # get_text handles nested tags more reliably than .text
+    return clean_text(el.get_text(" "))
+
+
+def extract_tender_document_id(raw_html: str):
+    """Best-effort extraction of tenderDocumentId from the page HTML.
+
+    The tender.gov.mn pages are Next.js apps; IDs are often embedded inside script payloads.
+    We pick the most frequent match to avoid grabbing unrelated IDs.
+    """
+    if not raw_html:
+        return None
+
+    # Match both normal JSON: "tenderDocumentId":123 and escaped payload strings: \"tenderDocumentId\":123
+    matches = re.findall(r'(?:\\"|")tenderDocumentId(?:\\"|")\s*:\s*(\d+)', raw_html)
+    if not matches:
+        matches = re.findall(r'tenderDocumentId\s*=\s*(\d+)', raw_html, flags=re.IGNORECASE)
+    if not matches:
+        return None
+
+    most_common, _count = Counter(matches).most_common(1)[0]
+    try:
+        return int(most_common)
+    except ValueError:
+        return None
+
 def get_info_from_html(content):
-    """Extract job listings from HTML content"""
+    """Extract tender details from HTML content."""
     results = {}
 
     #get name h1 tag
     name_h1 = content.find("h1", {"class": "text-2xl lg:text-3xl font-bold mb-4"})
-    results["name"] = clean_text(name_h1.text)
+    if name_h1 is None:
+        # Fallback: some pages may use a different heading structure
+        name_h1 = content.find("h1")
+    results["name"] = safe_text(name_h1)
 
     main_container = content.find("div", {"class": "p-4 md:p-6 rounded-lg bg-default-100"})
-    sub_containers = main_container.find_all("div", {"class": "grid grid-cols-1 md:grid-cols-2 items-center md:gap-4"})
+    if main_container is None:
+        logger.warning("Main tender info container not found; returning partial result")
+        results["details"] = []
+        return results
+
+    sub_containers = main_container.find_all(
+        "div", {"class": "grid grid-cols-1 md:grid-cols-2 items-center md:gap-4"}
+    )
 
     for container in sub_containers:
         label_div = container.find("div", {"class": "text-sm md:text-right text-default-500 font-light"})
         #label starts with a colon so i need to extract the value after the colon
         value_div = container.find_all("div", {"class": "text-sm"})
+        value_node = None
         if len(value_div) > 1:
-            value_div = value_div[1]
+            value_node = value_div[1]
+        elif len(value_div) == 1:
+            value_node = value_div[0]
             
-        #check if value_div contains a div
-        inner_div = value_div.find("div")
-        if inner_div:
-            value = clean_text(inner_div.text)
+        # check if value node contains a div
+        inner_div = value_node.find("div") if value_node else None
+        if inner_div is not None:
+            value = safe_text(inner_div)
         else:
-            value = clean_text(value_div.text)
-        
-        results[clean_text(label_div.text)] = value
+            value = safe_text(value_node)
+
+        label = safe_text(label_div)
+        if not label:
+            # Avoid crashing; keep some traceable key
+            label = "unknown"
+
+        results[label] = value
 
     results["details"] = []
 
@@ -92,10 +142,14 @@ async def get_info(url: str, output_name: str, max_retries: int = 3):
                     # Button doesn't exist - page might already show the content or have different structure
                     logger.warning(f"'Зарлал харах' button not found on page, proceeding with current content")
                 
-                html_content = BeautifulSoup(await page.content(), "html.parser")
+                raw_html = await page.content()
+                html_content = BeautifulSoup(raw_html, "html.parser")
                 await browser.close()
                 
                 info = get_info_from_html(html_content)
+                tender_document_id = extract_tender_document_id(raw_html)
+                if tender_document_id is not None:
+                    info["tenderDocumentId"] = tender_document_id
                 logger.debug(f"Successfully extracted info from {url}: {info.get('name', 'N/A')}")
                 return info
                 

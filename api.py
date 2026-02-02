@@ -334,13 +334,39 @@ async def friday_tender_process():
                 statistics=statistics,
                 timestamp=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
             )
+        else:
+            #before pdf to send mail
+            before_pdf_excel = f"tender_data/tender_overviews_{date_from}_to_{date_to}.xlsx"
+            save_to_excel(overviews, before_pdf_excel)
+            with open(before_pdf_excel, 'rb') as f: 
+                filedata = f.read()
+            send_email(
+                filename=os.path.basename(before_pdf_excel),
+                filedata=filedata, 
+                report_title="Tender Overview Report",
+                total_tenders=len(overviews),
+                type="special_friday",
+                mail_type="special"
+            )
+
+        
 
         specific_filename = f"specific_tender_pdfs_{date_from}_to_{date_to}"
         pdf_results = await specific_pdf_download(overviews, specific_filename)
         
-        # Calculate statistics
-        total_pdfs = sum(len(result.get('pdf_paths', [])) for result in pdf_results)
-        
+        if not pdf_results:
+            send_notification_email(
+                report_title="Tender PDF Download Report",
+                message="No PDFs were downloaded for the tenders in the specified date range.",
+                type="special_friday"
+            )
+            return TenderResponse(
+                status="success",
+                message="No PDFs were downloaded for the tenders in the specified date range.",
+                statistics=statistics,
+                timestamp=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+            )
+
         #save excel
         excel_filepath = f"tender_data/tender_overviews_pdf_{date_from}_to_{date_to}.xlsx"
         pdf_result_to_excel(pdf_results, excel_filepath)

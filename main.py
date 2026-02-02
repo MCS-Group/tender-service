@@ -11,7 +11,7 @@ load_dotenv()
 
 from src.services.get_info import get_info_from_tender_page, get_info_and_save
 from src.services.get_pdf import download_pdfs_from_tender_page
-from src.services.get_urls import tender_links_by_date
+from src.services.get_tenders import fetch_tender_infos
 from src.logger import logger
 from src.agent.agent import AgentProcessor
 from schemas.lvl_schema import TenderOverview, TenderOverviewConfig, TenderOverviewAgent, dict_of_level
@@ -32,7 +32,7 @@ def _json_default(value):
         return list(value)
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
-async def main(output_name: str = "tender_overviews", start_date: str = "2025-12-26", end_date: str = "2026-01-05"):
+async def main(output_name: str = "tender_overviews", start_date: str = "2026-01-02", end_date: str = "2026-01-02"):
     logger.info(f"Starting tender processing from {start_date} to {end_date}")
     logger.info(f"Output will be saved as: {output_name}")
     config = TenderOverviewConfig()
@@ -40,24 +40,21 @@ async def main(output_name: str = "tender_overviews", start_date: str = "2025-12
     processor = AgentProcessor(agent)
     overviews = []
     infos = []
-    publish_dates = [f"{start_date[:8]}{day:02d}" for day in range(int(start_date[8:]), int(end_date[8:]) + 1)]
+    
+    publish_dates = []
+    current_date = start_date
+    from datetime import datetime, timedelta
+    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
+    while current_date <= end_date_obj.strftime("%Y-%m-%d"):
+        publish_dates.append(current_date)
+        current_date_obj = datetime.strptime(current_date, "%Y-%m-%d") + timedelta(days=1)
+        current_date = current_date_obj.strftime("%Y-%m-%d")
+
     logger.info(f"Processing {len(publish_dates)} dates: {publish_dates}")
     for publish_date in publish_dates:
-        logger.info(f"Processing date: {publish_date}")
-        #check file tender_data/tender_infos_{publish_date}.json exists
-        if os.path.exists(f"tender_data/tender_infos_{publish_date}.json"):
-            #load infos from file
-            with open(f"tender_data/tender_infos_{publish_date}.json", "r", encoding="utf-8") as f:
-                infos_batch = json.load(f)
-            infos.extend(infos_batch)
-            logger.info(f"Loaded {len(infos_batch)} infos from tender_data/tender_infos_{publish_date}.json")
-            continue
-        logger.info(f"Fetching fresh data for {publish_date}")
-        links = await tender_links_by_date(publish_date)
-        logger.info(f"Found {len(links)} tender links for {publish_date}")
-        infos_batch = await get_info_and_save(links, f"tender_data/tender_infos_{publish_date}.json", ignore_existing=True)
-        logger.info(f"Saved {len(infos_batch)} tender infos for {publish_date}")
-        infos.extend(infos_batch)
+        tender_infos = await fetch_tender_infos(publish_date)
+        infos.extend(tender_infos)
+        logger.info(f"Fetched {len(tender_infos)} tender infos for date: {publish_date}")
     logger.info(f"Total infos collected: {len(infos)}")
     if os.path.exists(f"tender_data/{output_name}.json"):
             with open(f"tender_data/{output_name}.json", "r", encoding="utf-8") as f:
@@ -98,7 +95,8 @@ async def main(output_name: str = "tender_overviews", start_date: str = "2025-12
                     "tender_category": [dict_of_level.get(t, "") for t in tender_category],
                     "level2": tender_category,
                     "tender_category_detail": [dict_of_level.get(t, "") for t in tender_category_detail],
-                    "level3": tender_category_detail
+                    "level3": tender_category_detail,
+                    "body": info.get("body", "")
                 }
                 overviews.append(overview)
 
@@ -113,13 +111,6 @@ async def main(output_name: str = "tender_overviews", start_date: str = "2025-12
 
     
 async def specific_pdf_download(overviews: list[dict], output_name: str):
-
-    #check existing file
-    if os.path.exists(f"tender_data/{output_name}.json"):
-        with open(f"tender_data/{output_name}.json", "r", encoding="utf-8") as f:
-            existing_results = json.load(f)
-        logger.info(f"Loaded {len(existing_results)} existing PDF results from tender_data/{output_name}.json")
-        return existing_results
 
     logger.info(f"Starting specific PDF download process for {len(overviews)} overviews")
     #specific categories to analize pdf

@@ -244,6 +244,8 @@ def get_email_config() -> tuple[str, List[str], List[str], str]:
         fallback=["itgel.o@techpack.mn"],
     )
     cc_emails = _parse_email_list(os.getenv("CC_EMAILS") or os.getenv("CC_EMAIL"), fallback=[])
+    # receiver_emails = ["itgel.o@techpack.mn", "suvderdene.g@mcst.mn", "temuulen.b@mcst.mn"]
+    # cc_emails = ["nomin.ts@mcst.mn", "Udval.B@mcs.mn", "erdenebileg.b@techpack.mn"]
 
     if not app_password:
         logger.error("GMAIL_APP_PASSWORD not configured")
@@ -262,6 +264,8 @@ def get_speciel_email_config() -> tuple[str, List[str], List[str], str]:
         fallback=["itgel.o@techpack.mn"],
     )
     cc_emails = _parse_email_list(os.getenv("CC_EMAILS") or os.getenv("CC_EMAIL"), fallback=[])
+    # receiver_emails = ["itgel.o@techpack.mn", "suvderdene.g@mcst.mn", "temuulen.b@mcst.mn"]
+    # cc_emails = ["nomin.ts@mcst.mn", "Udval.B@mcs.mn", "erdenebileg.b@techpack.mn"]
 
     if not app_password:
         logger.error("GMAIL_APP_PASSWORD not configured")
