@@ -1,12 +1,41 @@
 import os
 import json
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
-from typing import List
+from playwright.async_api import async_playwright, Browser
+from typing import List, Optional
 import re
 from collections import Counter
+import asyncio
 
 from src.logger import logger
+
+# Global browser instance for reuse
+_browser: Optional[Browser] = None
+_playwright = None
+
+
+async def get_browser() -> Browser:
+    """Get or create a shared browser instance for better performance."""
+    global _browser, _playwright
+    if _browser is None or not _browser.is_connected():
+        _playwright = await async_playwright().start()
+        _browser = await _playwright.chromium.launch(
+            args=['--disable-dev-shm-usage', '--no-sandbox']
+        )
+        logger.info("Created new shared browser instance")
+    return _browser
+
+
+async def close_browser():
+    """Close the shared browser instance."""
+    global _browser, _playwright
+    if _browser:
+        await _browser.close()
+        _browser = None
+    if _playwright:
+        await _playwright.stop()
+        _playwright = None
+        logger.info("Closed shared browser instance")
 
 
 def clean_text(text):
@@ -110,48 +139,67 @@ def get_info_from_html(content):
     return results
 
 
-async def get_info(url: str, output_name: str, max_retries: int = 3):
-    """Fetch a job listing page using Playwright and extract jobs"""
+async def get_info(url: str, output_name: str, max_retries: int = 3, browser: Optional[Browser] = None):
+    """Fetch a job listing page using Playwright and extract jobs.
+    
+    Args:
+        url: The URL to fetch
+        output_name: Name for output (not used currently)
+        max_retries: Number of retry attempts
+        browser: Optional shared browser instance for better performance
+    """
     logger.info(f"Fetching tender info from: {url}")
     
     for attempt in range(max_retries):
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch()
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
-                )
-                page = await context.new_page()
-                page.on("dialog", lambda dialog: dialog.accept())
-                logger.debug(f"Navigating to URL: {url} (attempt {attempt + 1}/{max_retries})")
-                
-                await page.goto(url, timeout=60000)
-                await page.wait_for_load_state("networkidle", timeout=30000)
-                logger.debug("Page loaded successfully")
-                
-                # Try to find and click the "Зарлал харах" button with better error handling
-                button = page.get_by_role("button", name="Зарлал харах")
-                
-                # Check if button exists before clicking
-                button_count = await button.count()
-                if button_count > 0:
-                    await button.wait_for(state="visible", timeout=15000)
-                    await button.click(timeout=15000)
-                    logger.debug("Clicked 'Зарлал харах' button successfully")
-                else:
-                    # Button doesn't exist - page might already show the content or have different structure
-                    logger.warning(f"'Зарлал харах' button not found on page, proceeding with current content")
-                
-                raw_html = await page.content()
-                html_content = BeautifulSoup(raw_html, "html.parser")
-                await browser.close()
-                
-                info = get_info_from_html(html_content)
-                tender_document_id = extract_tender_document_id(raw_html)
-                if tender_document_id is not None:
-                    info["tenderDocumentId"] = tender_document_id
-                logger.debug(f"Successfully extracted info from {url}: {info.get('name', 'N/A')}")
-                return info
+            # Use shared browser or create a new one
+            if browser is not None:
+                current_browser = browser
+            else:
+                current_browser = await get_browser()
+            
+            context = await current_browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+            )
+            page = await context.new_page()
+            page.on("dialog", lambda dialog: dialog.accept())
+            logger.debug(f"Navigating to URL: {url} (attempt {attempt + 1}/{max_retries})")
+            
+            # Use domcontentloaded instead of load for faster initial response
+            await page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            
+            # Wait for specific content instead of networkidle (much faster)
+            try:
+                await page.wait_for_selector("div.p-4.md\\:p-6.rounded-lg.bg-default-100", timeout=10000)
+            except:
+                # Fallback to shorter networkidle if selector not found
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            
+            logger.debug("Page loaded successfully")
+            
+            # Try to find and click the "Зарлал харах" button with better error handling
+            button = page.get_by_role("button", name="Зарлал харах")
+            
+            # Check if button exists before clicking
+            button_count = await button.count()
+            if button_count > 0:
+                await button.wait_for(state="visible", timeout=5000)
+                await button.click(timeout=5000)
+                logger.debug("Clicked 'Зарлал харах' button successfully")
+            else:
+                # Button doesn't exist - page might already show the content or have different structure
+                logger.warning(f"'Зарлал харах' button not found on page, proceeding with current content")
+            
+            raw_html = await page.content()
+            html_content = BeautifulSoup(raw_html, "lxml")  # lxml is faster than html.parser
+            await context.close()  # Close context, not browser
+            
+            info = get_info_from_html(html_content)
+            tender_document_id = extract_tender_document_id(raw_html)
+            if tender_document_id is not None:
+                info["tenderDocumentId"] = tender_document_id
+            logger.debug(f"Successfully extracted info from {url}: {info.get('name', 'N/A')}")
+            return info
                 
         except Exception as e:
             logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {url}: {e}")
@@ -178,7 +226,15 @@ async def get_info_from_tender_page(url: str):
         logger.error(f"Error processing tender page {url}: {e}", exc_info=True)
         return {}
 
-async def get_info_and_save(urls: List[str], output_name: str, ignore_existing: bool = False):
+async def get_info_and_save(urls: List[str], output_name: str, ignore_existing: bool = False, concurrency: int = 5):
+    """Fetch info from multiple URLs with concurrent processing.
+    
+    Args:
+        urls: List of URLs to process
+        output_name: Output file path
+        ignore_existing: Whether to skip existing URLs
+        concurrency: Number of concurrent requests (default 5)
+    """
     #check if file exists
     existing_infos = []
     if ignore_existing and os.path.exists(output_name):
@@ -187,18 +243,48 @@ async def get_info_and_save(urls: List[str], output_name: str, ignore_existing: 
         logger.info(f"Loaded {len(existing_infos)} existing infos from {output_name}")
     all_infos = existing_infos.copy()
     existing_urls = {info.get("official_link") for info in existing_infos}
-    for url in urls:
-        if url in existing_urls:
-            logger.info(f"Skipping existing URL: {url}")
-            continue
-        info = await get_info_from_tender_page(url)
-        if info:
-            all_infos.append(info)
-            logger.info(f"Extracted info from {url}")
+    
+    # Filter URLs that need processing
+    urls_to_process = [url for url in urls if url not in existing_urls]
+    
+    if not urls_to_process:
+        logger.info("No new URLs to process")
+        return all_infos
+    
+    logger.info(f"Processing {len(urls_to_process)} URLs with concurrency={concurrency}")
+    
+    # Get shared browser instance
+    browser = await get_browser()
+    
+    # Create semaphore for concurrency control
+    semaphore = asyncio.Semaphore(concurrency)
+    
+    async def process_url(url: str):
+        async with semaphore:
+            try:
+                info = await get_info(url, "tender_info_page", browser=browser)
+                if info:
+                    info["official_link"] = url
+                    logger.info(f"Successfully processed: {info.get('name', 'N/A')[:50]}...")
+                return info
+            except Exception as e:
+                logger.error(f"Error processing {url}: {e}")
+                return None
+    
+    # Process URLs concurrently
+    tasks = [process_url(url) for url in urls_to_process]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Collect successful results
+    for result in results:
+        if result and not isinstance(result, Exception):
+            all_infos.append(result)
+    
     #save all infos to json file
     with open(output_name, "w", encoding="utf-8") as f:
         json.dump(all_infos, f, ensure_ascii=False, indent=4)
     
+    logger.info(f"Saved {len(all_infos)} total infos to {output_name}")
     return all_infos
 
 

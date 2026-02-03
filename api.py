@@ -167,7 +167,7 @@ async def process_tenders(request: TenderRequest):
 async def monday_tender_process():
     start_time = time.time()
     date_to = time.strftime("%Y-%m-%d", time.gmtime(start_time))
-    date_from = time.strftime("%Y-%m-%d", time.gmtime(start_time - 3 * 24 * 60 * 60))  # 3 days back to cover weekend
+    date_from = time.strftime("%Y-%m-%d", time.gmtime(start_time - 2 * 24 * 60 * 60))  # 2 days back to cover weekend
     logger.info(f"Processing tenders from {date_from} to {date_to} - Monday run")
     try:
         output_name = f"tender_overviews_{date_from}_to_{date_to}"
@@ -191,6 +191,20 @@ async def monday_tender_process():
                 statistics=statistics,
                 timestamp=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
             )
+        
+        #before pdf to send mail
+        before_pdf_excel = f"tender_data/tender_overviews_{date_from}_to_{date_to}.xlsx"
+        save_to_excel(overviews, before_pdf_excel)
+        with open(before_pdf_excel, 'rb') as f: 
+            filedata = f.read()
+        send_email(
+            filename=os.path.basename(before_pdf_excel),
+            filedata=filedata,
+            report_title="Tender Overview Report",
+            total_tenders=len(overviews),
+            type="special_monday",
+            mail_type="special"
+        )
 
         specific_filename = f"specific_tender_pdfs_{date_from}_to_{date_to}"
         pdf_results = await specific_pdf_download(overviews, specific_filename)
@@ -237,7 +251,7 @@ async def wednesday_tender_process():
     """
     start_time = time.time()
     date_to = time.strftime("%Y-%m-%d", time.gmtime(start_time))
-    date_from = time.strftime("%Y-%m-%d", time.gmtime(start_time - 2 * 24 * 60 * 60))  # 2 days back
+    date_from = time.strftime("%Y-%m-%d", time.gmtime(start_time - 1 * 24 * 60 * 60))  # 1 day back
     logger.info(f"Processing tenders from {date_from} to {date_to} - Wednesday run")
 
     try:
@@ -309,7 +323,7 @@ async def friday_tender_process():
     """
     start_time = time.time()
     date_to = time.strftime("%Y-%m-%d", time.gmtime(start_time))
-    date_from = time.strftime("%Y-%m-%d", time.gmtime(start_time - 2 * 24 * 60 * 60))  # 2 days back
+    date_from = time.strftime("%Y-%m-%d", time.gmtime(start_time - 1 * 24 * 60 * 60))  # 1 day back
     logger.info(f"Processing tenders from {date_from} to {date_to} - Friday run")
 
     try:

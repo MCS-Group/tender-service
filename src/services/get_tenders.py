@@ -4,11 +4,12 @@ import json
 import asyncio
 import requests
 import re
+from typing import Optional
 
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Browser
 from markdownify import markdownify as md
-
+import aiohttp
 
 from src.logger import logger
 
@@ -18,50 +19,81 @@ BASE_URL = "https://api.tender.gov.mn/api/process/300/list"
 # detail url https://www.tender.gov.mn/api/get-invitation-by-document-id?tenderDocumentId=1769934209748&invitationTypeId=1
 DETAIL_URL = "https://www.tender.gov.mn/api/get-invitation-by-document-id?tenderDocumentId={tenderDocumentId}&invitationTypeId=1"
 
+# Global browser instance for reuse
+_browser: Optional[Browser] = None
+_playwright = None
+
+
+async def get_browser() -> Browser:
+    """Get or create a shared browser instance for better performance."""
+    global _browser, _playwright
+    if _browser is None or not _browser.is_connected():
+        _playwright = await async_playwright().start()
+        _browser = await _playwright.chromium.launch(
+            args=['--disable-dev-shm-usage', '--no-sandbox']
+        )
+        logger.info("Created new shared browser instance")
+    return _browser
+
+
+async def close_browser():
+    """Close the shared browser instance."""
+    global _browser, _playwright
+    if _browser:
+        await _browser.close()
+        _browser = None
+    if _playwright:
+        await _playwright.stop()
+        _playwright = None
+        logger.info("Closed shared browser instance")
+
+
 async def get_info(url: str, output_name: str, max_retries: int = 3):
     """Fetch a job listing page using Playwright and extract jobs"""
     logger.info(f"Fetching tender info from: {url}")
     
     for attempt in range(max_retries):
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch()
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
-                )
-                page = await context.new_page()
-                page.on("dialog", lambda dialog: dialog.accept())
-                logger.debug(f"Navigating to URL: {url} (attempt {attempt + 1}/{max_retries})")
-                
-                await page.goto(url, timeout=60000)
-                await page.wait_for_load_state("networkidle", timeout=30000)
-                logger.debug("Page loaded successfully")
-                # Try to find and click the "Зарлал харах" button with better error handling
-                button = page.get_by_role("button", name="Зарлал харах")
-                
-                # Check if button exists before clicking
-                button_count = await button.count()
-                if button_count > 0:
-                    await button.wait_for(state="visible", timeout=15000)
-                    await button.click(timeout=15000)
-                    logger.debug("Clicked 'Зарлал харах' button successfully")
-                else:
-                    # Button doesn't exist - page might already show the content or have different structure
-                    logger.warning(f"'Зарлал харах' button not found on page, proceeding with current content")
-                raw_html = await page.content()
-                html_content = BeautifulSoup(raw_html, "html.parser")
-                await browser.close()
+            browser = await get_browser()
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+            )
+            page = await context.new_page()
+            page.on("dialog", lambda dialog: dialog.accept())
+            logger.debug(f"Navigating to URL: {url} (attempt {attempt + 1}/{max_retries})")
+            
+            await page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            
+            # Wait for specific content instead of networkidle (much faster)
+            try:
+                await page.wait_for_selector("button", timeout=5000)
+            except:
+                await page.wait_for_load_state("networkidle", timeout=10000)
+            
+            logger.debug("Page loaded successfully")
+            # Try to find and click the "Зарлал харах" button with better error handling
+            button = page.get_by_role("button", name="Зарлал харах")
+            
+            # Check if button exists before clicking
+            button_count = await button.count()
+            if button_count > 0:
+                await button.wait_for(state="visible", timeout=5000)
+                await button.click(timeout=5000)
+                logger.debug("Clicked 'Зарлал харах' button successfully")
+            else:
+                # Button doesn't exist - page might already show the content or have different structure
+                logger.warning(f"'Зарлал харах' button not found on page, proceeding with current content")
+            raw_html = await page.content()
+            html_content = BeautifulSoup(raw_html, "lxml")
+            await context.close()
+            return str(html_content)
         except Exception as e:
             logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {url}: {e}")
             if attempt < max_retries - 1:
-                import asyncio
-                wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
-                logger.info(f"Retrying in {wait_time}s...")
-                await asyncio.sleep(wait_time)
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
             else:
-                logger.error(f"All {max_retries} attempts failed for {url}")
-                raise
-    return str(html_content)
+                return ""
+    return ""
         
 
 async def get_tender_document_id(html_content) -> str | None:
@@ -86,8 +118,8 @@ async def get_tender_document_id(html_content) -> str | None:
     return tender_document_id
 
 
-async def fetch_tender_infos(publish_date: str) -> list:
-    """Fetch tender URLs from the API for a given publish date"""
+async def fetch_tender_infos(publish_date: str, concurrency: int = 5) -> list:
+    """Fetch tender URLs from the API for a given publish date with concurrent processing"""
     params = {
         "publishDate": publish_date
     }
@@ -99,45 +131,61 @@ async def fetch_tender_infos(publish_date: str) -> list:
         if not data:
             logger.error(f"API returned non-success status for date {publish_date}: {data}")
             return []
-        infos = []
+        
+        # Build list of items to process
+        items_to_process = []
         for item in data:
             tender_id = item.get("tenderId")
-            tender_code = item.get("tenderCode")
-            invitation_id = item.get("invitationId")
-            invitation_number = item.get("invitationNumber")
-            published_date = item.get("publishDate")
-            tender_name = item.get("tenderName")
-            total_budget = item.get("totalBudget")
-            tender_type_name = item.get("tenderTypeName")
-            budget_entity_name = item.get("budgetEntityName")
-            fund_name = item.get("fundName")
-            budget_entity_name = item.get("budgetEntityName")
-            doc_status_code = item.get("docStatusCode")
-            if doc_status_code == "CLOSED_STATUS":
-                continue
-
             if tender_id:
+                items_to_process.append(item)
+        
+        logger.info(f"Processing {len(items_to_process)} tenders concurrently (concurrency={concurrency})")
+        
+        # Semaphore for concurrency control
+        semaphore = asyncio.Semaphore(concurrency)
+        
+        async def process_single_tender(item):
+            """Process a single tender item"""
+            async with semaphore:
+                tender_id = item.get("tenderId")
+                tender_code = item.get("tenderCode")
+                invitation_id = item.get("invitationId")
+                invitation_number = item.get("invitationNumber")
+                published_date = item.get("publishDate")
+                tender_name = item.get("tenderName")
+                total_budget = item.get("totalBudget")
+                tender_type_name = item.get("tenderTypeName")
+                budget_entity_name = item.get("budgetEntityName")
+                fund_name = item.get("fundName")
+                doc_status_code = item.get("docStatusCode")
+                
                 url = f"https://www.tender.gov.mn/mn/invitation/detail/{invitation_id}"
-                html_content = await get_info(url, "tender_info_page")
-                document_id = await get_tender_document_id(html_content)
-                if document_id:
-                    try:
-                        url = DETAIL_URL.format(tenderDocumentId=document_id)
-
-                        #body from detail url
-                        response_detail = requests.get(url)
-                        response_detail.raise_for_status()
-                        detail_data = response_detail.json()
-                        body = detail_data.get("data", {}).get("body", "")
-                        #encode body
-                        encoded_body = body.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
-                        markdown_content = md(encoded_body)
-                        encoded_body = markdown_content
-                    except Exception as e:
-                        body = ""
-                        encoded_body = ""
-
-                infos.append({
+                encoded_body = ""
+                detail_url = ""
+                
+                try:
+                    html_content = await get_info(url, "tender_info_page")
+                    document_id = await get_tender_document_id(html_content)
+                    
+                    if document_id:
+                        detail_url = DETAIL_URL.format(tenderDocumentId=document_id)
+                        try:
+                            # Use aiohttp for async HTTP request
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(detail_url, timeout=aiohttp.ClientTimeout(total=10)) as response_detail:
+                                    if response_detail.status == 200:
+                                        detail_data = await response_detail.json()
+                                        body = detail_data.get("data", {}).get("body", "")
+                                        encoded_body = body.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+                                        markdown_content = md(encoded_body)
+                                        encoded_body = markdown_content
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch detail for {document_id}: {e}")
+                            encoded_body = ""
+                except Exception as e:
+                    logger.error(f"Error processing tender {tender_id}: {e}")
+                
+                return {
                     "tender_id": tender_id,
                     "tender_code": tender_code,
                     "invitation_id": invitation_id,
@@ -148,13 +196,21 @@ async def fetch_tender_infos(publish_date: str) -> list:
                     "publish_date": published_date,
                     "fund_name": fund_name,
                     "budget_entity_name": budget_entity_name,
+                    "doc_status_code": doc_status_code,
                     "official_link": f"https://www.tender.gov.mn/mn/invitation/detail/{invitation_id}",
-                    "detail_url": url,
+                    "detail_url": detail_url,
                     "body": encoded_body
-                })
-                
-        logger.info(f"Extracted {len(infos)} tender URLs for date: {publish_date}")
-        return infos
+                }
+        
+        # Process all tenders concurrently
+        tasks = [process_single_tender(item) for item in items_to_process]
+        infos = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Filter out exceptions
+        valid_infos = [info for info in infos if isinstance(info, dict)]
+        
+        logger.info(f"Extracted {len(valid_infos)} tender URLs for date: {publish_date}")
+        return valid_infos
     except requests.RequestException as e:
         logger.error(f"Error fetching tender URLs: {e}", exc_info=True)
         return []

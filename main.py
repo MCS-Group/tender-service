@@ -56,56 +56,51 @@ async def main(output_name: str = "tender_overviews", start_date: str = "2026-01
         infos.extend(tender_infos)
         logger.info(f"Fetched {len(tender_infos)} tender infos for date: {publish_date}")
     logger.info(f"Total infos collected: {len(infos)}")
-    if os.path.exists(f"tender_data/{output_name}.json"):
-            with open(f"tender_data/{output_name}.json", "r", encoding="utf-8") as f:
-                existing_overviews = json.load(f)
-            overviews.extend(existing_overviews)
-            logger.info(f"Loaded {len(existing_overviews)} existing overviews from tender_data/{output_name}.json")
-    else:
-        logger.info("Processing tender infos to generate overviews")
-        logger.info(f"Processing {len(infos)} tender infos using AI agent")
-        results = await processor.process_batch(infos)
-        
-        if results is None:
-            logger.warning("AI agent returned None results")
-            results = []
-        
-        if results:
-            logger.info(f"Successfully processed {len(results)} tender overviews")
-            for result, info in zip(results, infos):
-                logger.debug(f"Matched result for tender: {result.name}")
-                logger.debug(f"Official link: {info.get('official_link', '')}")
-                
-                # Handle None values for categories
-                tender_category = result.tender_category if result.tender_category is not None else []
-                tender_category_detail = result.tender_category_detail if result.tender_category_detail is not None else []
-                
-                overview = {
-                    "name": result.name,
-                    "selection_number": result.selection_number,
-                    "ordering_organization": result.ordering_organization,
-                    "announced_date": result.announced_date,
-                    "deadline_date": result.deadline_date,
-                    "official_link": info.get("official_link", ""),
-                    "total_budget": result.total_budget,
-                    "budget_type": result.budget_type,
-                    "tender_type": dict_of_level.get(result.tender_type, result.tender_type),
-                    "summary": result.summary,
-                    "level1": result.tender_type,
-                    "tender_category": [dict_of_level.get(t, "") for t in tender_category],
-                    "level2": tender_category,
-                    "tender_category_detail": [dict_of_level.get(t, "") for t in tender_category_detail],
-                    "level3": tender_category_detail,
-                    "body": info.get("body", "")
-                }
-                overviews.append(overview)
 
-        
-            #save overviews to json file
-            logger.info(f"Saving {len(overviews)} overviews to tender_data/{output_name}.json")
-            with open(f"tender_data/{output_name}.json", "w", encoding="utf-8") as f:
-                json.dump(overviews, f, ensure_ascii=False, indent=4)
-            logger.info(f"Successfully saved overviews to file")
+    logger.info("Processing tender infos to generate overviews")
+    logger.info(f"Processing {len(infos)} tender infos using AI agent")
+    results = await processor.process_batch(infos)
+    
+    if results is None:
+        logger.warning("AI agent returned None results")
+        results = []
+    
+    if results:
+        logger.info(f"Successfully processed {len(results)} tender overviews")
+        for result, info in zip(results, infos):
+            logger.debug(f"Matched result for tender: {result.name}")
+            logger.debug(f"Official link: {info.get('official_link', '')}")
+            
+            # Handle None values for categories
+            tender_category = result.tender_category if result.tender_category is not None else []
+            tender_category_detail = result.tender_category_detail if result.tender_category_detail is not None else []
+            
+            overview = {
+                "name": result.name,
+                "selection_number": result.selection_number,
+                "ordering_organization": result.ordering_organization,
+                "announced_date": result.announced_date,
+                "deadline_date": result.deadline_date,
+                "official_link": info.get("official_link", ""),
+                "total_budget": result.total_budget,
+                "budget_type": result.budget_type,
+                "tender_type": dict_of_level.get(result.tender_type, result.tender_type),
+                "summary": result.summary,
+                "level1": result.tender_type,
+                "tender_category": [dict_of_level.get(t, "") for t in tender_category],
+                "level2": tender_category,
+                "tender_category_detail": [dict_of_level.get(t, "") for t in tender_category_detail],
+                "level3": tender_category_detail,
+                "body": info.get("body", "")
+            }
+            overviews.append(overview)
+
+    
+        #save overviews to json file
+        logger.info(f"Saving {len(overviews)} overviews to tender_data/{output_name}.json")
+        with open(f"tender_data/{output_name}.json", "w", encoding="utf-8") as f:
+            json.dump(overviews, f, ensure_ascii=False, indent=4)
+        logger.info(f"Successfully saved overviews to file")
     logger.info(f"Main processing completed. Total overviews: {len(overviews)}")
     return overviews
 
