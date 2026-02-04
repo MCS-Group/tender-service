@@ -1103,13 +1103,13 @@ class TenderOverviewAgent:
         self.agent = Agent(
             model=self.config.model_name,
             system_prompt=full_system_prompt,
-            output_type=TenderOverview,
+            result_type=TenderOverview,
         )
 
         self.batch_agent = Agent(
             model=self.config.model_name,
             system_prompt=full_system_prompt,
-            output_type=List[TenderOverview],
+            result_type=List[TenderOverview],
         )
 
     async def analyze_tender(self, input_data: dict) -> TenderOverview | None:
@@ -1117,7 +1117,7 @@ class TenderOverviewAgent:
             overview = await self.agent.run([
                 str(input_data)
             ])
-            return overview.output
+            return overview.data
         except Exception as e:
             return None
         
@@ -1126,7 +1126,7 @@ class TenderOverviewAgent:
             overviews = await self.batch_agent.run([
                 str(input_data) for input_data in input_data_list
             ])
-            return overviews.output
+            return overviews.data
         except Exception as e:
             return []
         

@@ -59,6 +59,7 @@ def save_to_excel(overviews: List[dict], filename: str):
     # Column Headers
     headers = [
         "№", 
+        "Зарласан огноо",
         "Summary",
         "Category",
         "Category Detail",
@@ -66,7 +67,6 @@ def save_to_excel(overviews: List[dict], filename: str):
         "Захиалагч", 
         "Нийт төсөвт өртөг", 
         "Budget Type",
-        "Зарласан огноо", 
         "Хүлээн авах огноо", 
         "Шалгаруулалтын дугаар", 
         "Link",
@@ -86,6 +86,7 @@ def save_to_excel(overviews: List[dict], filename: str):
     # Adjust column widths (A–P)
     column_widths = [
         5,   # №
+        12,  # Зарласан огноо
         45,  # Summary
         18,  # Category
         22,  # Category Detail
@@ -93,7 +94,6 @@ def save_to_excel(overviews: List[dict], filename: str):
         25,  # Захиалагч
         18,  # Нийт төсөвт өртөг
         16,  # Budget Type
-        12,  # Зарласан огноо
         12,  # Хүлээн авах огноо
         20,  # Шалгаруулалтын дугаар
         35,  # Link
@@ -243,7 +243,7 @@ def save_to_excel(overviews: List[dict], filename: str):
     # Data Rows (grouped): each category/detail is its own row; Summary is merged vertically
     data_row = 5
     tender_no = 1
-    merge_cols = [1, 2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    merge_cols = [1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 
     base_row_height = 15.0
     max_row_height = 240.0
@@ -268,6 +268,7 @@ def save_to_excel(overviews: List[dict], filename: str):
 
             row_data = [
                 tender_no if i == 0 else None,  # №
+                format_value(overview.get("announced_date", "")) if i == 0 else None,  # Зарласан огноо
                 format_value(overview.get("summary", "")) if i == 0 else None,
                 format_value(pick_from_list(categories, i), use_dict=True),
                 format_value(pick_from_list(details, i), use_dict=True),
@@ -275,7 +276,6 @@ def save_to_excel(overviews: List[dict], filename: str):
                 format_value(overview.get("ordering_organization", "")) if i == 0 else None,
                 format_value(overview.get("total_budget", "")) if i == 0 else None,
                 infer_budget_type(overview) if i == 0 else None,
-                format_value(overview.get("announced_date", "")) if i == 0 else None,
                 format_value(overview.get("deadline_date", "")) if i == 0 else None,
                 format_value(overview.get("selection_number", "")) if i == 0 else None,
                 format_value(overview.get("official_link", "")) if i == 0 else None,
@@ -291,14 +291,15 @@ def save_to_excel(overviews: List[dict], filename: str):
                 cell.border = thin_border
                 cell.alignment = left_align
 
-                if col_idx == 1:
+                # № and Зарласан огноо centered
+                if col_idx in (1, 2):
                     cell.alignment = center_align_top
 
                 # Category/Detail/Level2/Level3 look better centered like the mockup
-                if col_idx in (3, 4, 15, 16):
+                if col_idx in (4, 5, 15, 16):
                     cell.alignment = center_align_top
 
-                if col_idx == 7 and i == 0 and value is not None:
+                if col_idx == 8 and i == 0 and value is not None:
                     cell.number_format = '#,##0.00'
 
                 if col_idx == 12 and i == 0:
@@ -322,16 +323,16 @@ def save_to_excel(overviews: List[dict], filename: str):
                     ws.cell(row=rr, column=col_idx).border = thin_border
 
             # Ensure merged cells have enough total height across the group.
-            _ensure_group_height(start_row, end_row, 2, overview.get("summary", ""), base_row_height, max_row_height)
-            _ensure_group_height(start_row, end_row, 5, overview.get("name", ""), base_row_height, max_row_height)
-            _ensure_group_height(start_row, end_row, 6, overview.get("ordering_organization", ""), base_row_height, max_row_height)
+            _ensure_group_height(start_row, end_row, 3, overview.get("summary", ""), base_row_height, max_row_height)
+            _ensure_group_height(start_row, end_row, 6, overview.get("name", ""), base_row_height, max_row_height)
+            _ensure_group_height(start_row, end_row, 7, overview.get("ordering_organization", ""), base_row_height, max_row_height)
             _ensure_group_height(start_row, end_row, 12, overview.get("official_link", ""), base_row_height, max_row_height)
 
             # If there is a single category/level2 but multiple detail rows, merge Category/Level2 too
             if len(categories) == 1:
-                ws.merge_cells(start_row=start_row, start_column=3, end_row=end_row, end_column=3)
+                ws.merge_cells(start_row=start_row, start_column=4, end_row=end_row, end_column=4)
                 for rr in range(start_row, end_row + 1):
-                    ws.cell(row=rr, column=3).border = thin_border
+                    ws.cell(row=rr, column=4).border = thin_border
             if len(level2_list) == 1:
                 ws.merge_cells(start_row=start_row, start_column=15, end_row=end_row, end_column=15)
                 for rr in range(start_row, end_row + 1):
@@ -343,6 +344,9 @@ def save_to_excel(overviews: List[dict], filename: str):
     # Freeze panes so headers remain visible while scrolling
     ws.freeze_panes = "A5"
 
+    # Add auto-filter for filtering (especially Category and Category Detail)
+    last_data_row = data_row - 1
+    ws.auto_filter.ref = f"A4:P{last_data_row}"
 
     try:
         wb.save(filename)
@@ -578,6 +582,10 @@ def pdf_result_to_excel(raw_overviews: List[dict], filename: str):
         tender_no += 1
 
     ws.freeze_panes = "A5"
+
+    # Add auto-filter for filtering capabilities
+    last_data_row = data_row - 1
+    ws.auto_filter.ref = f"A4:O{last_data_row}"
 
     try:
         wb.save(filename)
