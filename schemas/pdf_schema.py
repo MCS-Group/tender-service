@@ -62,7 +62,7 @@ class PDFOverviewAgent:
         self.agent = Agent(
             model=self.config.model_name,
             system_prompt=self.config.system_prompt,
-            result_type=PDFOverview,
+            output_type=PDFOverview,
         )
     
     async def analyze_tender(self, input_files: list[BinaryContent]) -> PDFOverview | None:
@@ -70,7 +70,7 @@ class PDFOverviewAgent:
             overview = await self.agent.run([
                 *input_files
             ])
-            return overview.data
+            return overview.output
         except Exception as e:
             return None
         
@@ -82,7 +82,7 @@ class PDFFoodOverviewAgent:
         self.agent = Agent(
             model=self.config.model_name,
             system_prompt=self.config.system_prompt,
-            result_type=PDFFoodOverview,
+            output_type=PDFFoodOverview,
         )
     
     async def analyze_tender(self, input_files: list[BinaryContent]) -> PDFFoodOverview | None:
@@ -90,6 +90,6 @@ class PDFFoodOverviewAgent:
             overview = await self.agent.run([
                 *input_files
             ])
-            return overview.data
+            return overview.output
         except Exception as e:
             return None
