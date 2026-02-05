@@ -128,6 +128,19 @@ async def process_tenders(request: TenderRequest):
 
         specific_filename = f"specific_tender_pdfs_{request.date_from}_to_{request.date_to}"
         pdf_results = await specific_pdf_download(overviews, specific_filename)
+
+        #send overviews
+        overview_excel = f"tender_data/tender_overviews_{request.date_from}_to_{request.date_to}.xlsx"
+        save_to_excel(overviews, overview_excel)
+        with open(overview_excel, 'rb') as f: 
+            overview_filedata = f.read()
+        
+        send_email(
+            filename=os.path.basename(overview_excel),
+            filedata=overview_filedata, 
+            report_title="Tender Overview Report",
+            total_tenders=len(overviews),
+        )
         
         # Calculate statistics
         total_pdfs = sum(len(result.get('pdf_paths', [])) for result in pdf_results)
