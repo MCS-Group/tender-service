@@ -1087,7 +1087,7 @@ class TenderOverviewConfig(BaseModel):
     )
 
     model_name: str = Field(
-        default="google-gla:gemini-3-pro-preview",
+        default="google-gla:gemini-2.5-pro",
         title="Model Name",
         description="The name of the language model to use for generating the tender overview.",
     )

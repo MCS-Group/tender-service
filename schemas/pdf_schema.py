@@ -50,7 +50,7 @@ class PDFOverviewConfig(BaseModel):
         default="You are an expert in extracting structured data from tender documents. Extract the required information accurately and concisely.", 
         description="System prompt guiding the agent's behavior.")
     model_name: str = Field(
-        default="google-gla:gemini-3-pro-preview",
+        default="google-gla:gemini-2.5-pro",
         title="Model Name",
         description="The name of the language model to use for generating the tender overview.",
     )
