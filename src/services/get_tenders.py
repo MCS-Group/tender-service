@@ -9,7 +9,6 @@ from typing import Optional
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright, Browser
 from markdownify import markdownify as md
-import aiohttp
 
 from src.logger import logger
 
@@ -28,7 +27,8 @@ async def get_browser() -> Browser:
     """Get or create a shared browser instance for better performance."""
     global _browser, _playwright
     if _browser is None or not _browser.is_connected():
-        _playwright = await async_playwright().start()
+        if _playwright is None:
+            _playwright = await async_playwright().start()
         _browser = await _playwright.chromium.launch(
             args=['--disable-dev-shm-usage', '--no-sandbox']
         )
@@ -40,19 +40,27 @@ async def close_browser():
     """Close the shared browser instance."""
     global _browser, _playwright
     if _browser:
-        await _browser.close()
+        try:
+            await _browser.close()
+        except Exception:
+            pass
         _browser = None
     if _playwright:
-        await _playwright.stop()
+        try:
+            await _playwright.stop()
+        except Exception:
+            pass
         _playwright = None
         logger.info("Closed shared browser instance")
 
 
 async def get_info(url: str, output_name: str, max_retries: int = 3):
     """Fetch a job listing page using Playwright and extract jobs"""
+    global _browser, _playwright
     logger.info(f"Fetching tender info from: {url}")
     
     for attempt in range(max_retries):
+        context = None
         try:
             browser = await get_browser()
             context = await browser.new_context(
@@ -89,6 +97,15 @@ async def get_info(url: str, output_name: str, max_retries: int = 3):
             return str(html_content)
         except Exception as e:
             logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {url}: {e}")
+            # Clean up context on error
+            if context:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+            # Reset browser if it's a connection/closed error
+            if "closed" in str(e).lower() or "target" in str(e).lower():
+                _browser = None
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)  # Exponential backoff
             else:
@@ -169,19 +186,22 @@ async def fetch_tender_infos(publish_date: str, concurrency: int = 5) -> list:
                     
                     if document_id:
                         detail_url = DETAIL_URL.format(tenderDocumentId=document_id)
-                        try:
-                            # Use aiohttp for async HTTP request
-                            async with aiohttp.ClientSession() as session:
-                                async with session.get(detail_url, timeout=aiohttp.ClientTimeout(total=10)) as response_detail:
-                                    if response_detail.status == 200:
-                                        detail_data = await response_detail.json()
-                                        body = detail_data.get("data", {}).get("body", "")
-                                        encoded_body = body.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
-                                        markdown_content = md(encoded_body)
-                                        encoded_body = markdown_content
-                        except Exception as e:
-                            logger.warning(f"Failed to fetch detail for {document_id}: {e}")
-                            encoded_body = ""
+                        for retry in range(3):
+                            try:
+                                response_detail = requests.get(detail_url, timeout=15)
+                                if response_detail.status_code == 200:
+                                    detail_data = response_detail.json()
+                                    body = detail_data.get("data", {}).get("body", "")
+                                    encoded_body = body.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+                                    markdown_content = md(encoded_body)
+                                    encoded_body = markdown_content
+                                    break
+                            except requests.RequestException as e:
+                                logger.warning(f"Retry {retry + 1}/3 failed to fetch detail for {document_id}: {e}")
+                                if retry < 2:
+                                    await asyncio.sleep(1 * (retry + 1))
+                                else:
+                                    encoded_body = ""
                 except Exception as e:
                     logger.error(f"Error processing tender {tender_id}: {e}")
                 

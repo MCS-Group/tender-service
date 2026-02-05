@@ -279,7 +279,9 @@ async def wednesday_tender_process():
 
         specific_filename = f"specific_tender_pdfs_{date_from}_to_{date_to}"
         pdf_results = await specific_pdf_download(overviews, specific_filename)
-        
+        #before pdf to send mail
+        before_pdf_excel = f"tender_data/tender_overviews_{date_from}_to_{date_to}.xlsx"
+        save_to_excel(overviews, before_pdf_excel)
         # Calculate statistics
         total_pdfs = sum(len(result.get('pdf_paths', [])) for result in pdf_results)
         
