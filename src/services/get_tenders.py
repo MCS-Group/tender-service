@@ -103,9 +103,9 @@ async def get_info(url: str, output_name: str, max_retries: int = 3):
                     await context.close()
                 except Exception:
                     pass
-            # Reset browser if it's a connection/closed error
-            if "closed" in str(e).lower() or "target" in str(e).lower():
-                _browser = None
+            # Reset browser and playwright if it's a connection/closed/driver error
+            if "closed" in str(e).lower() or "target" in str(e).lower() or "driver" in str(e).lower():
+                await close_browser()  # Properly clean up both browser and playwright
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)  # Exponential backoff
             else:

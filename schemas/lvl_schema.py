@@ -1121,12 +1121,27 @@ class TenderOverviewAgent:
         except Exception as e:
             return None
         
-    async def analyze_tender_batch(self, input_data_list: List[dict]) -> List[TenderOverview]:
-        try:
-            overviews = await self.batch_agent.run([
-                str(input_data) for input_data in input_data_list
-            ])
-            return overviews.output
-        except Exception as e:
-            return []
+    async def analyze_tender_batch(self, input_data_list: List[dict], batch_size: int = 10) -> List[TenderOverview]:
+        """Process tenders in smaller chunks to avoid API timeouts."""
+        all_results = []
+        total = len(input_data_list)
+        
+        for i in range(0, total, batch_size):
+            chunk = input_data_list[i:i + batch_size]
+            chunk_num = i // batch_size + 1
+            total_chunks = (total + batch_size - 1) // batch_size
+            
+            try:
+                overviews = await self.batch_agent.run([
+                    str(input_data) for input_data in chunk
+                ])
+                if overviews.output:
+                    all_results.extend(overviews.output)
+            except Exception as e:
+                # Log error but continue with remaining chunks
+                print(f"Error processing chunk {chunk_num}/{total_chunks}: {e}")
+                # Add None placeholders for failed items to maintain index alignment
+                all_results.extend([None] * len(chunk))
+                
+        return all_results
         

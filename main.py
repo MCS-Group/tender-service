@@ -68,6 +68,11 @@ async def main(output_name: str = "tender_overviews", start_date: str = "2026-01
     if results:
         logger.info(f"Successfully processed {len(results)} tender overviews")
         for result, info in zip(results, infos):
+            # Skip None results from failed batch chunks
+            if result is None:
+                logger.warning(f"Skipping None result for tender: {info.get('official_link', 'unknown')}")
+                continue
+                
             logger.debug(f"Matched result for tender: {result.name}")
             logger.debug(f"Official link: {info.get('official_link', '')}")
             

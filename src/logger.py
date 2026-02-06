@@ -37,10 +37,15 @@ console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setLevel(logging.INFO)
 console_handler.setFormatter(console_formatter)
 
+#debugging handler (optional, can be enabled for more verbose output)
+debug_handler = logging.StreamHandler(sys.stdout)
+debug_handler.setLevel(logging.DEBUG)
+debug_handler.setFormatter(detailed_formatter)
+
 # Configure root logger
 logging.basicConfig(
     level=logging.DEBUG,
-    handlers=[file_handler, console_handler]
+    handlers=[file_handler, console_handler, debug_handler]
 )
 
 # Create logger instance
